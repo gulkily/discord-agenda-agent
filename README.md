@@ -1,113 +1,131 @@
 # Discord Agenda Agent
 
-A Discord community assistant that aggregates **tech events only** from multiple sources (Discord channels, X/Twitter, Luma calendars, and web searches) and automatically posts a formatted agenda to Discord.
+A Discord bot that aggregates **tech events only** from multiple sources (Discord channels, X/Twitter, and web searches) and automatically posts a formatted agenda to Discord.
 
 ## Features
 
 - **Multi-source tech event collection:**
-  - Searches Discord channels for community-posted tech events
-  - Scans X (Twitter) for tech event announcements
-  - Reads calendar events from tech organizations' Luma pages
-  - Searches the web for prominent tech events
+  - Reads Discord channels for community-posted tech events
+  - Searches X/Twitter influencers for tech event announcements
+  - Searches the web for Luma calendars, hackathons, and tech meetups
 
-- **Intelligent compilation:**
+- **Intelligent filtering:**
   - Filters for tech events only (meetups, conferences, hackathons, workshops, AI/ML events, developer gatherings)
-  - Chronologically sorts events
-  - Removes duplicates
+  - Excludes non-tech events (music, art, sports, general social events)
   - Formats events with all relevant details (time, location, description, registration links)
 
 - **Automatic Discord posting:**
-  - Automatically posts compiled agenda to specified Discord channel
+  - Posts compiled agenda to specified Discord channel
   - Handles long messages by splitting into multiple Discord messages (2000 char limit)
-  - No user review required - posts immediately after compilation
+  - Streams agent output in real-time
 
 ## Architecture
 
-The project is structured into two main files:
-
-- **`main.py`**: Main agent logic, event collection, agenda compilation, and Discord posting
-- **`connection.py`**: DAuth connection schemas for MCP servers (Discord, X/Twitter)
+```
+discord-agenda-agent/
+├── main.py              # Agent logic, streaming, and Discord posting
+├── connection.py        # DAuth connection schemas for MCP servers
+├── requirements.txt     # Python dependencies
+├── env.example          # Environment variable template
+├── .env                 # Your credentials (not in git)
+└── README.md
+```
 
 ## Prerequisites
 
-1. **Discord App Setup:**
-   - Create a Discord app at https://discord.com/developers/docs/intro
-   - Obtain your Discord App ID, Token, and Public Key
-   - Grant the bot the following scopes:
-     - `guilds.channels.read` - To read channel lists
-     - `messages.read` - To read messages from channels
+1. **Discord Bot Setup:**
+   - Create a Discord app at https://discord.com/developers/applications
+   - Create a bot and get the bot token
+   - Grant the bot these permissions:
+     - `Read Messages/View Channels` - To read channel lists
+     - `Read Message History` - To read messages from channels
      - `Send Messages` - To post the agenda
-   - Connect the app to your Discord server
+   - Invite the bot to your Discord server
 
 2. **X (Twitter) Bearer Token:**
    - Get a bearer token from https://developer.x.com
 
 3. **Dedalus Labs API Key:**
-   - You'll need a Dedalus Labs API key for the agent framework
-   - Get it from https://www.dedaluslabs.ai
+   - Get an API key from https://www.dedaluslabs.ai
 
 ## Installation
 
 1. Clone this repository:
 ```bash
-git clone <repository-url>
+git clone https://github.com/NickyHeC/discord-agenda-agent.git
 cd discord-agenda-agent
 ```
 
-2. Install dependencies:
+2. Create a virtual environment and install dependencies:
 ```bash
+python -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
 3. Set up environment variables:
-   - Copy `env.example` to `.env`
-   - Fill in your credentials:
-     ```bash
-     # Dedalus API Key
-     DEDALUS_API_KEY=your_dedalus_api_key
-     DEDALUS_AS_URL=https://as.dedaluslabs.ai
+```bash
+cp env.example .env
+```
 
-     # Discord Credentials
-     DISCORD_APP_ID=your_discord_app_id
-     DISCORD_TOKEN=your_discord_token
-     DISCORD_PUBLIC_KEY=your_discord_public_key
-     
-     # Optional: Override default Discord channel for posting
-     DISCORD_POST_CHANNEL_ID=your_channel_id
+Edit `.env` with your credentials:
+```bash
+# Dedalus API Key
+DEDALUS_API_KEY=your_dedalus_api_key
+DEDALUS_AS_URL=https://as.dedaluslabs.ai
 
-     # X (Twitter) Bearer Token
-     X_BEARER_TOKEN=your_x_bearer_token
-     ```
+# Discord Credentials
+DISCORD_TOKEN=your_discord_bot_token
+DISCORD_GUILD_ID=your_discord_server_id
+DISCORD_POST_CHANNEL_ID=your_target_channel_id
+
+# X (Twitter) API
+X_BEARER_TOKEN=your_x_bearer_token
+```
 
 ## Usage
 
-Run the agent:
-```bash
-python main.py
-```
-
-Or with command-line arguments:
-```bash
-python main.py "Feb 9th to Feb 15th" "San Francisco"
-```
-
-The agent will:
-1. Prompt for time frame and location (if not provided as arguments)
-2. Search for tech events from all configured sources
-3. Compile them into a chronological agenda
-4. Display the agenda in the terminal
-5. **Automatically post the agenda to Discord** (no user confirmation required)
-
-### Example
-
+Run the agent with command-line arguments:
 ```bash
 python main.py "next week" "San Francisco"
 ```
 
-This will:
-- Search for tech events in San Francisco for the next week
-- Compile the agenda
-- Automatically post to the Discord channel specified in `DISCORD_POST_CHANNEL_ID` (or the default channel)
+Or run interactively:
+```bash
+python main.py
+# Prompts for time frame and location
+```
+
+The agent will:
+1. Search for tech events from Discord, X/Twitter, and web sources
+2. Stream the results in real-time to your terminal
+3. Automatically post the compiled agenda to Discord
+
+## How It Works
+
+1. **Event Collection**: The agent searches multiple sources:
+   - **Discord**: Reads channels from the specified guild (server) for event announcements
+   - **X/Twitter**: Finds tech influencers via web search, then searches their recent tweets
+   - **Web**: Searches for Luma calendars, hackathons, and tech meetups
+
+2. **Streaming Output**: Results stream to your terminal as the agent works
+
+3. **Discord Posting**: The compiled agenda is:
+   - Formatted with a header and timestamp
+   - Split into multiple messages if over 2000 characters
+   - Posted to the channel specified in `DISCORD_POST_CHANNEL_ID`
+
+## MCP Servers
+
+The agent uses these MCP (Model Context Protocol) servers via Dedalus Labs:
+
+| Server | Purpose |
+|--------|---------|
+| `nickyhec/discord-mcp` | Discord channel reading and message access |
+| `windsor/x-api-mcp` | X/Twitter API for searching user tweets |
+| `tsion/brave-search-mcp` | Web searches for events and calendars |
+
+Credentials are passed securely via DAuth (encrypted client-side, decrypted in secure enclave).
 
 ## Event Format
 
@@ -117,106 +135,40 @@ Each event in the agenda follows this format:
 **Event Title**
 Time & Location: [specific time and location]
 Description: [1 line description]
-Registration: [link when available]
-Notes: [special instructions or relevant notes when applicable]
-Source: [concise source of information]
+Registration: [link]
+Source: [source]
 ```
-
-Events are:
-- Sorted chronologically by date and time
-- Filtered to include only tech events (meetups, conferences, hackathons, workshops, AI/ML events, developer gatherings)
-- Duplicates removed if the same event appears in multiple sources
-- Include timezone information when available
-- Include registration links whenever available
 
 ## Tech Events Focus
 
-The agent **only** searches for and compiles tech-related events:
-
 **Included:**
 - Tech meetups, conferences, hackathons, workshops
-- Software engineering, programming, AI/ML, data science events
+- AI/ML, data science, programming events
 - Startup events, tech networking, developer gatherings
-- Tech talks, seminars, webinars
 
 **Excluded:**
 - Music, art, sports events
 - General social gatherings (unless tech-related)
-- Non-tech community events
-
-## MCP Servers
-
-The agent uses the following MCP (Model Context Protocol) servers:
-
-- **`nickyhec/discord-mcp`** - Discord channel searches and message reading
-- **`windsor/x-api-mcp`** - X/Twitter API integration for event searches
-- **`tsion/brave-search-mcp`** - Web searches and Luma calendar access
-
-MCP servers read credentials directly from environment variables (no DAuth credentials need to be passed).
-
-## Models
-
-The agent uses multiple models for different tasks:
-
-- **`anthropic/claude-opus-4-5`** - Event search and collection
-- **`openai/gpt-4-turbo`** - Agenda compilation and formatting
-
-## How It Works
-
-1. **Event Collection**: The agent searches multiple sources simultaneously:
-   - Discord channels in the specified server (searches channels like #events, #announcements, #social, #general)
-   - X/Twitter for tech event announcements
-   - Luma calendars for tech organizations
-   - Web searches for prominent tech events
-
-2. **Agenda Compilation**: Events are:
-   - Filtered to include only tech events
-   - Sorted chronologically
-   - Deduplicated
-   - Formatted according to the specified format
-
-3. **Discord Posting**: After compilation:
-   - The agenda is captured via the `capture_agenda` tool
-   - Python code automatically posts to Discord
-   - Long agendas are split into multiple messages (Discord 2000 character limit)
-   - Posts to the channel specified in `DISCORD_POST_CHANNEL_ID` environment variable
-
-## Project Structure
-
-```
-discord-agenda-agent/
-├── main.py              # Main agent logic and Discord posting
-├── connection.py        # DAuth connection schemas for MCP servers
-├── requirements.txt     # Python dependencies
-├── env.example         # Environment variable template
-├── .env                # Your actual credentials (not in git)
-└── README.md           # This file
-```
-
-## Error Handling
-
-The agent handles various error scenarios:
-
-- **Discord authentication errors**: Displays clear error messages
-- **Missing permissions**: Indicates which Discord scopes are needed
-- **No events found**: Includes "No posted Discord tech community events" in the agenda
-- **Posting failures**: Logs detailed error information with HTTP status and response body
 
 ## Troubleshooting
 
 **Agent doesn't post to Discord:**
-- Check that `DISCORD_TOKEN` is set correctly in `.env`
-- Verify the bot has `Send Messages` permission in the target channel
-- Check that `DISCORD_POST_CHANNEL_ID` is set to a valid channel ID
+- Check that `DISCORD_TOKEN` is set correctly
+- Verify `DISCORD_POST_CHANNEL_ID` is a valid channel ID
+- Ensure the bot has `Send Messages` permission in that channel
+
+**Discord channel reading fails:**
+- Verify `DISCORD_GUILD_ID` is correct (right-click server → Copy Server ID)
+- Check the bot is a member of the server
+- Ensure the bot has `Read Messages` and `Read Message History` permissions
+
+**X/Twitter returns no results:**
+- This often means no matching tweets were found (not an error)
+- The agent will note "X unavailable" and continue with other sources
 
 **No events found:**
-- Verify Discord bot has `guilds.channels.read` and `messages.read` scopes
-- Check that the bot is a member of the Discord server
-- Ensure the time frame and location parameters are clear
-
-**X/Twitter search not working:**
-- Verify `X_BEARER_TOKEN` is set correctly
-- Check that the token has the necessary permissions
+- Try broadening the time frame or location
+- Check the event calendars linked in the output for real-time updates
 
 ## License
 
