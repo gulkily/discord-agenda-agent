@@ -1,42 +1,45 @@
 """Discord Agenda Agent - Collects tech events and posts to Discord."""
-import asyncio
-import json
 import os
 import sys
+import asyncio
 import httpx
 from datetime import datetime
 from dedalus_labs import AsyncDedalus, DedalusRunner
+# from dedalus_labs.utils.stream import stream_async
 from dotenv import load_dotenv
-from connection import check_discord_credentials
+from connection import x_secrets, discord_secrets
 
 load_dotenv()
 
-LAST_AGENDA = {"text": ""}
 DISCORD_API = "https://discord.com/api/v9"
 DISCORD_MAX = 2000
 
 
-def capture_agenda(agenda_text: str) -> str:
-    """Tool stub - actual execution happens on Dedalus servers."""
-    return "Agenda captured."
-
-
 def chunk(text: str, limit: int = DISCORD_MAX) -> list[str]:
-    """Splits text into chunks that fit Discord's 2000 char limit."""
-    if not text or len(text) <= limit:
+    """Split text into chunks that fit Discord's 2000 char limit, preserving line breaks."""
+    if len(text) <= limit:
         return [text] if text else [""]
-    out, cur = [], ""
+    
+    chunks, current = [], ""
     for line in text.splitlines(keepends=True):
+        # Handle lines longer than the limit
         while len(line) > limit:
-            if cur: out.append(cur); cur = ""
-            out.append(line[:limit]); line = line[limit:]
-        if len(cur) + len(line) > limit:
-            if cur: out.append(cur)
-            cur = line
+            if current:
+                chunks.append(current)
+                current = ""
+            chunks.append(line[:limit])
+            line = line[limit:]
+        
+        if len(current) + len(line) <= limit:
+            current += line
         else:
-            cur += line
-    if cur: out.append(cur)
-    return out
+            if current:
+                chunks.append(current)
+            current = line
+    
+    if current:
+        chunks.append(current)
+    return chunks
 
 
 async def post_to_discord(channel_id: str, content: str, token: str) -> list[str]:
@@ -61,38 +64,35 @@ AGENT_PROMPT = """You are a tech event research agent. Collect TECH EVENTS ONLY 
 **Tech events include:** meetups, conferences, hackathons, workshops, AI/ML events, startup events, developer gatherings.
 **Exclude:** music, art, sports, general social events.
 
-**Tasks:**
+**Tasks (do each ONCE, then move on):**
 
 1. **Discord** (discord-mcp): 
-   - Call list_servers() → find "Break In - Dec 2025" server → list_channels(server_id) → read_messages(channel_id, limit=100) 
-   - Read from #events, #announcements, #social, #general, #test-whiteballon channels
-   - Filter for tech events in time frame. If no tech events found, note "No posted Discord tech community events"
+   - list_channels(guild_id="{guild_id}") → find #events or #announcements → read_messages(channel_id)
+   - If Discord fails or no tech events: note "No Discord community events"
 
-2. **Web/Luma** (brave-search-mcp): 
-   - Search for tech Luma calendars and "{location} tech events/hackathons/conferences {time_frame}"
+2. **X/Twitter**:
+   - First, use brave-search-mcp to find 2-3 X/Twitter influencers who post about {location} tech meetups, hackathons, or developer events
+   - Then, use x_get_user_tweets (x-api-mcp) to search those users' (using their user ids) recent tweets for events: "from:username {location} meetup OR hackathon OR event"
+   - If X fails: note "X unavailable"
 
-**Output format for EACH event:**
+3. **Web** (brave-search-mcp): 
+   - MAX 3 searches for "{location} tech events {time_frame}", Luma calendars, hackathons
+   - Stop searching once you have 3+ events
+
+**Output format:**
 **Event Title**
 Time & Location: [time and location]
 Description: [1 line]
-Registration: [link if available]
+Registration: [link]
 Source: [source]
 
-**Rules:** Sort chronologically, remove duplicates.
-
-**Final step:** Call `capture_agenda(agenda_text)` with the compiled agenda. Do NOT call send_message or post to Discord directly."""
-
-
-def get_agent_prompt():
-    """Returns the agent prompt template."""
-    return AGENT_PROMPT
+After collecting events (or if none found), output the compiled agenda directly."""
 
 
 async def main():
     """Main function to run the Discord Agenda Agent."""
     client = AsyncDedalus(timeout=900)  # 15 minutes
     runner = DedalusRunner(client)
-    check_discord_credentials()
     
     print("Discord Agenda Agent\n" + "="*50)
     
@@ -103,54 +103,45 @@ async def main():
         time_frame = input("Time frame (e.g., 'next week'): ").strip() or "next week"
         location = input("Location (e.g., 'San Francisco'): ").strip() or "general"
     
-    prompt = get_agent_prompt().format(time_frame=time_frame, location=location)
-    
-    if hasattr(sys.stdout, 'reconfigure'):
-        sys.stdout.reconfigure(line_buffering=True)
-    
-    print("\nCollecting events...\n", flush=True)
+    guild_id = os.getenv("DISCORD_GUILD_ID", "")
     
     response = runner.run(
-        input=prompt,
-        model=["anthropic/claude-opus-4-5", "openai/gpt-4-turbo"],
-        mcp_servers=["nickyhec/discord-mcp", "tsion/brave-search-mcp"],
-        tools=[capture_agenda],
+        input=AGENT_PROMPT.format(time_frame=time_frame, location=location, guild_id=guild_id),
+        model=["anthropic/claude-opus-4-5"],
+        mcp_servers=["windsor/x-api-mcp", "nickyhec/discord-mcp", "tsion/brave-search-mcp"],
+        credentials=[x_secrets, discord_secrets],
         stream=True
     )
     
-    # Stream and capture tool call arguments
-    captured = None
+    # Stream and capture the agent's output
+    agenda = ""
     async for chunk in response:
-        if not hasattr(chunk, 'choices'): continue
-        for choice in chunk.choices:
-            # Display content
-            if hasattr(choice, 'delta') and choice.delta and hasattr(choice.delta, 'content') and choice.delta.content:
-                print(choice.delta.content, end='', flush=True)
-            # Capture tool calls from delta or message
-            for src in [getattr(choice, 'delta', None), getattr(choice, 'message', None)]:
-                if src and hasattr(src, 'tool_calls') and src.tool_calls:
-                    for tc in src.tool_calls:
-                        if hasattr(tc, 'function') and getattr(tc.function, 'name', '') == 'capture_agenda':
-                            try:
-                                args = json.loads(tc.function.arguments) if isinstance(tc.function.arguments, str) else tc.function.arguments
-                                if isinstance(args, dict) and 'agenda_text' in args:
-                                    captured = args['agenda_text']
-                                    print(f"\n✅ Captured agenda ({len(captured)} chars)", flush=True)
-                            except: pass
+        if hasattr(chunk, 'choices'):
+            for choice in chunk.choices:
+                delta = getattr(choice, 'delta', None)
+                if delta and hasattr(delta, 'content') and delta.content:
+                    print(delta.content, end='', flush=True)
+                    agenda += delta.content
     
-    if captured:
-        LAST_AGENDA["text"] = f"📅 **EVENT AGENDA**\n\n{captured}\n\n---\n*Generated {datetime.now():%Y-%m-%d %H:%M:%S}*"
+    print("\n" + "="*50, flush=True)
     
-    if not LAST_AGENDA["text"]:
-        raise RuntimeError("No agenda captured")
+    # Debugging
+    if not agenda.strip():
+        print("⚠️ No agenda generated", flush=True)
+        return
     
     token = os.getenv("DISCORD_TOKEN", "").strip()
     if not token:
         print("⚠️ No DISCORD_TOKEN, skipping post.", flush=True)
         return
     
-    channel_id = os.getenv("DISCORD_POST_CHANNEL_ID", "1463395829057454194")
-    msg_ids = await post_to_discord(channel_id, LAST_AGENDA["text"], token)
+    # Format and post to Discord
+    formatted = f"📅 **EVENT AGENDA**\n\n{agenda}\n\n---\n*Generated {datetime.now():%Y-%m-%d %H:%M:%S}*"
+    channel_id = os.getenv("DISCORD_POST_CHANNEL_ID", "")
+    if not channel_id:
+        print("⚠️ No DISCORD_POST_CHANNEL_ID, skipping post.", flush=True)
+        return
+    msg_ids = await post_to_discord(channel_id, formatted, token)
     print(f"✅ Posted to Discord: {msg_ids}", flush=True)
 
 
